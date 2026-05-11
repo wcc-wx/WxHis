@@ -6,7 +6,7 @@
         <el-card header="今日接诊">
           <el-table :data="todayQueue" stripe height="400">
             <el-table-column prop="sequence_no" label="序号" width="60" />
-            <el-table-column prop="patient.name" label="患者" />
+            <el-table-column prop="pat_master.name" label="患者" />
             <el-table-column prop="status" label="状态" width="80">
               <template #default="{ row }">
                 <el-tag :type="getStatusType(row.status)" size="small">
@@ -19,7 +19,7 @@
                 <el-button
                   type="primary"
                   size="small"
-                  :disabled="row.status !== 'pending'"
+                  :disabled="!['registered', 'checked_in'].includes(row.status)"
                   @click="startVisit(row)"
                 >
                   接诊
@@ -34,7 +34,7 @@
         <el-card v-if="currentVisit" header="当前就诊">
           <el-form label-width="100px">
             <el-form-item label="患者姓名">
-              <span>{{ currentVisit.patient?.name }}</span>
+              <span>{{ currentVisit.pat_master?.name }}</span>
             </el-form-item>
             <el-form-item label="主诉">
               <el-input v-model="currentVisit.chief_complaint" type="textarea" rows="2" />
@@ -42,8 +42,11 @@
             <el-form-item label="现病史">
               <el-input v-model="currentVisit.present_illness" type="textarea" rows="3" />
             </el-form-item>
-            <el-form-item label="诊断">
-              <el-input v-model="currentVisit.diagnosis" />
+            <el-form-item label="既往史">
+              <el-input v-model="currentVisit.past_history" type="textarea" rows="2" />
+            </el-form-item>
+            <el-form-item label="体格检查">
+              <el-input v-model="currentVisit.physical_exam" type="textarea" rows="2" />
             </el-form-item>
             <el-form-item label="处理">
               <el-space wrap>
@@ -64,12 +67,11 @@
       </el-col>
     </el-row>
 
-    <!-- 处方对话框 -->
     <el-dialog v-model="showPrescriptionDialog" title="开具处方" width="600px">
       <el-form :model="prescriptionForm" label-width="80px">
         <el-form-item label="药品">
-          <el-select v-model="prescriptionForm.drugId" placeholder="选择药品" style="width: 100%">
-            <el-option v-for="drug in drugs" :key="drug.id" :label="`${drug.name} (${drug.spec})`" :value="drug.id" />
+          <el-select v-model="prescriptionForm.drugId" placeholder="选择药品" filterable style="width: 100%">
+            <el-option v-for="drug in drugs" :key="drug.id" :label="`${drug.common_name} (${drug.spec}) ¥${drug.price / 100}`" :value="drug.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="剂量">
@@ -78,10 +80,19 @@
         <el-form-item label="用法">
           <el-select v-model="prescriptionForm.usage" placeholder="选择用法">
             <el-option label="口服" value="口服" />
-            <el-option label="静注" value="静注" />
-            <el-option label="肌注" value="肌注" />
+            <el-option label="静注" value="静脉注射" />
+            <el-option label="肌注" value="肌肉注射" />
             <el-option label="外用" value="外用" />
-            <el-option label="雾化" value="雾化" />
+            <el-option label="雾化" value="吸入" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="频次">
+          <el-select v-model="prescriptionForm.frequency" placeholder="选择频次">
+            <el-option label="每日1次" value="QD" />
+            <el-option label="每日2次" value="BID" />
+            <el-option label="每日3次" value="TID" />
+            <el-option label="每日4次" value="QID" />
+            <el-option label="必要时" value="PRN" />
           </el-select>
         </el-form-item>
         <el-form-item label="数量">
@@ -94,12 +105,11 @@
       </template>
     </el-dialog>
 
-    <!-- 检验对话框 -->
     <el-dialog v-model="showLabDialog" title="开具检验申请" width="500px">
       <el-form label-width="80px">
         <el-form-item label="检验项目">
-          <el-select v-model="labForm.testItemId" placeholder="选择检验项目" style="width: 100%">
-            <el-option v-for="item in testItems" :key="item.id" :label="item.name" :value="item.id" />
+          <el-select v-model="labForm.testItemId" placeholder="选择检验项目" filterable style="width: 100%">
+            <el-option v-for="item in testItems" :key="item.id" :label="`${item.name} (${item.category || '常规'})`" :value="item.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="标本类型">
@@ -108,6 +118,8 @@
             <el-option label="尿液" value="尿液" />
             <el-option label="粪便" value="粪便" />
             <el-option label="痰液" value="痰液" />
+            <el-option label="脑脊液" value="脑脊液" />
+            <el-option label="胸腹水" value="胸腹水" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -117,19 +129,18 @@
       </template>
     </el-dialog>
 
-    <!-- 影像检查对话框 -->
     <el-dialog v-model="showImagingDialog" title="开具检查申请" width="500px">
       <el-form label-width="80px">
-        <el-form-item label="检查类型">
-          <el-select v-model="imagingForm.examType" placeholder="选择检查类型">
-            <el-option label="CT" value="CT" />
-            <el-option label="MR" value="MR" />
-            <el-option label="X-Ray" value="X-Ray" />
-            <el-option label="超声" value="超声" />
+        <el-form-item label="检查项目">
+          <el-select v-model="imagingForm.examItemId" placeholder="选择检查项目" filterable style="width: 100%">
+            <el-option v-for="item in examItems" :key="item.id" :label="`${item.name} (${item.category})`" :value="item.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="检查部位">
-          <el-input v-model="imagingForm.examPart" placeholder="如：胸部、腹部" />
+          <el-input v-model="imagingForm.examBodyPart" placeholder="如：胸部、腹部" />
+        </el-form-item>
+        <el-form-item label="检查方法">
+          <el-input v-model="imagingForm.examMethod" placeholder="如：平扫、增强" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -145,14 +156,15 @@ import { ref, reactive, onMounted } from 'vue'
 import { supabase } from '@/composables/supabase'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import type { Registration, Drug, TestItem } from '@/types'
+import type { MdDrug, MdLisItem, MdRisItem } from '@/types'
 
 const authStore = useAuthStore()
 
 const todayQueue = ref<any[]>([])
 const currentVisit = ref<any | null>(null)
-const drugs = ref<Drug[]>([])
-const testItems = ref<TestItem[]>([])
+const drugs = ref<MdDrug[]>([])
+const testItems = ref<MdLisItem[]>([])
+const examItems = ref<MdRisItem[]>([])
 
 const showPrescriptionDialog = ref(false)
 const showLabDialog = ref(false)
@@ -162,6 +174,7 @@ const prescriptionForm = reactive({
   drugId: '',
   dosage: '',
   usage: '',
+  frequency: '',
   quantity: 1
 })
 
@@ -171,22 +184,19 @@ const labForm = reactive({
 })
 
 const imagingForm = reactive({
-  examType: '',
-  examPart: ''
+  examItemId: '',
+  examBodyPart: '',
+  examMethod: ''
 })
 
 async function fetchTodayQueue() {
   const today = new Date().toISOString().split('T')[0]
 
   const { data } = await supabase
-    .from('registrations')
-    .select(`
-      *,
-      patient:patients(*),
-      department:departments(*)
-    `)
-    .gte('registration_time', `${today}T00:00:00`)
-    .lte('registration_time', `${today}T23:59:59`)
+    .from('op_registration')
+    .select('*, pat_master:pat_master(name), dept:org_dept(name)')
+    .eq('visit_date', today)
+    .in('status', ['registered', 'checked_in', 'in_progress'])
     .order('sequence_no')
 
   todayQueue.value = data || []
@@ -194,17 +204,23 @@ async function fetchTodayQueue() {
 
 async function startVisit(row: any) {
   await supabase
-    .from('registrations')
+    .from('op_registration')
     .update({ status: 'in_progress' })
     .eq('id', row.id)
 
+  const visitSn = `V${new Date().toISOString().split('T')[0].replace(/-/g, '')}${Date.now().toString(36).toUpperCase()}`
+
   const { data } = await supabase
-    .from('outpatient_visits')
+    .from('op_visit')
     .insert({
-      registration_id: row.id,
-      patient_id: row.patient_id,
+      pat_id: row.pat_id,
+      visit_sn: visitSn,
+      reg_id: row.id,
+      dept_id: row.dept_id,
       doctor_id: authStore.profile?.id,
-      visit_time: new Date().toISOString()
+      visit_time: new Date().toISOString(),
+      chief_complaint: row.complaint,
+      visit_type: row.visit_type
     })
     .select()
     .single()
@@ -217,11 +233,12 @@ async function saveVisit() {
   if (!currentVisit.value?.visit) return
 
   const { error } = await supabase
-    .from('outpatient_visits')
+    .from('op_visit')
     .update({
       chief_complaint: currentVisit.value.chief_complaint,
       present_illness: currentVisit.value.present_illness,
-      diagnosis: currentVisit.value.diagnosis
+      past_history: currentVisit.value.past_history,
+      physical_exam: currentVisit.value.physical_exam
     })
     .eq('id', currentVisit.value.visit.id)
 
@@ -236,8 +253,8 @@ async function finishVisit() {
   if (!currentVisit.value) return
 
   await Promise.all([
-    supabase.from('registrations').update({ status: 'finished' }).eq('id', currentVisit.value.id),
-    supabase.from('outpatient_visits').update({ diagnosis: currentVisit.value.diagnosis }).eq('id', currentVisit.value.visit.id)
+    supabase.from('op_registration').update({ status: 'finished' }).eq('id', currentVisit.value.id),
+    supabase.from('op_visit').update({}).eq('id', currentVisit.value.visit.id)
   ])
 
   ElMessage.success('就诊完成')
@@ -251,8 +268,34 @@ async function addPrescriptionItem() {
     return
   }
 
-  ElMessage.success('已添加到处方')
-  showPrescriptionDialog.value = false
+  const drug = drugs.value.find(d => d.id === prescriptionForm.drugId)
+  if (!drug) return
+
+  const prescriptionNo = `RX${Date.now().toString(36).toUpperCase()}`
+
+  const { error } = await supabase.from('op_prescription').insert({
+    pat_id: currentVisit.value.pat_id,
+    visit_sn: currentVisit.value.visit_sn,
+    visit_id: currentVisit.value.visit.id,
+    prescription_no: prescriptionNo,
+    dept_id: currentVisit.value.dept_id,
+    doctor_id: authStore.profile?.id,
+    diagnosis: JSON.stringify([{ name: currentVisit.value.diagnosis || '待定' }]),
+    total_amount: drug.price * prescriptionForm.quantity,
+    prescription_type: 'western'
+  })
+
+  if (error) {
+    ElMessage.error('开方失败')
+  } else {
+    ElMessage.success('处方已开具')
+    showPrescriptionDialog.value = false
+    prescriptionForm.drugId = ''
+    prescriptionForm.dosage = ''
+    prescriptionForm.usage = ''
+    prescriptionForm.frequency = ''
+    prescriptionForm.quantity = 1
+  }
 }
 
 async function submitLabRequest() {
@@ -261,40 +304,107 @@ async function submitLabRequest() {
     return
   }
 
-  ElMessage.success('检验申请已提交')
-  showLabDialog.value = false
+  const item = testItems.value.find(t => t.id === labForm.testItemId)
+  if (!item) return
+
+  const requestNo = `LIS${Date.now().toString(36).toUpperCase()}`
+
+  const { error } = await supabase.from('lis_request').insert({
+    request_no: requestNo,
+    pat_id: currentVisit.value.pat_id,
+    visit_id: currentVisit.value.visit.id,
+    visit_sn: currentVisit.value.visit_sn,
+    patient_name: currentVisit.value.pat_master?.name,
+    dept_id: currentVisit.value.dept_id,
+    doctor_id: authStore.profile?.id,
+    specimen_type: labForm.specimenType,
+    test_items: JSON.stringify([{ id: item.id, name: item.name }]),
+    status: 'pending'
+  })
+
+  if (error) {
+    ElMessage.error('提交失败')
+  } else {
+    ElMessage.success('检验申请已提交')
+    showLabDialog.value = false
+    labForm.testItemId = ''
+    labForm.specimenType = ''
+  }
 }
 
 async function submitImagingRequest() {
-  if (!imagingForm.examType || !imagingForm.examPart) {
-    ElMessage.warning('请填写完整信息')
+  if (!imagingForm.examItemId) {
+    ElMessage.warning('请选择检查项目')
     return
   }
 
-  ElMessage.success('检查申请已提交')
-  showImagingDialog.value = false
+  const item = examItems.value.find(e => e.id === imagingForm.examItemId)
+  if (!item) return
+
+  const requestNo = `RIS${Date.now().toString(36).toUpperCase()}`
+
+  const { error } = await supabase.from('ris_request').insert({
+    request_no: requestNo,
+    pat_id: currentVisit.value.pat_id,
+    visit_id: currentVisit.value.visit.id,
+    visit_sn: currentVisit.value.visit_sn,
+    patient_name: currentVisit.value.pat_master?.name,
+    dept_id: currentVisit.value.dept_id,
+    doctor_id: authStore.profile?.id,
+    exam_item_id: item.id,
+    exam_item_name: item.name,
+    exam_body_part: imagingForm.examBodyPart || item.exam_body_part,
+    exam_method: imagingForm.examMethod,
+    has_contrast: item.has_contrast,
+    priority: 'normal',
+    status: 'pending'
+  })
+
+  if (error) {
+    ElMessage.error('提交失败')
+  } else {
+    ElMessage.success('检查申请已提交')
+    showImagingDialog.value = false
+    imagingForm.examItemId = ''
+    imagingForm.examBodyPart = ''
+    imagingForm.examMethod = ''
+  }
 }
 
 function getStatusType(status: string): string {
-  const map: Record<string, string> = { pending: 'warning', in_progress: 'primary', finished: 'success' }
+  const map: Record<string, string> = {
+    registered: 'warning',
+    checked_in: 'primary',
+    in_progress: 'danger',
+    finished: 'success',
+    cancelled: 'info'
+  }
   return map[status] || 'info'
 }
 
 function getStatusLabel(status: string): string {
-  const map: Record<string, string> = { pending: '待诊', in_progress: '就诊中', finished: '已完成' }
+  const map: Record<string, string> = {
+    registered: '已挂号',
+    checked_in: '已报到',
+    in_progress: '就诊中',
+    finished: '已完成',
+    cancelled: '已退号'
+  }
   return map[status] || status
 }
 
 onMounted(async () => {
   await fetchTodayQueue()
 
-  const [drugsRes, testItemsRes] = await Promise.all([
-    supabase.from('drugs').select('*').limit(50),
-    supabase.from('test_items').select('*')
+  const [drugsRes, testItemsRes, examItemsRes] = await Promise.all([
+    supabase.from('md_drug').select('*').eq('status', 'active').limit(100),
+    supabase.from('md_lis_item').select('*').eq('status', 'active'),
+    supabase.from('md_ris_item').select('*').eq('status', 'active')
   ])
 
   drugs.value = drugsRes.data || []
   testItems.value = testItemsRes.data || []
+  examItems.value = examItemsRes.data || []
 })
 </script>
 
